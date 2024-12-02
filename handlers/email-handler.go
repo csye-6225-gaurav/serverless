@@ -8,16 +8,35 @@ import (
 	"os"
 
 	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/csye-6225-gaurav/serverless/models"
 	"github.com/sendgrid/sendgrid-go"
 	"github.com/sendgrid/sendgrid-go/helpers/mail"
 )
 
 func HandleUserEmailVerification(ctx context.Context, event events.SNSEvent) error {
+	secretName := "lambda_secret_SG"
+	region := "us-east-1"
+	config, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(region))
+	if err != nil {
+		log.Println(err)
+	}
+	svc := secretsmanager.NewFromConfig(config)
 
+	input := &secretsmanager.GetSecretValueInput{
+		SecretId:     aws.String(secretName),
+		VersionStage: aws.String("AWSCURRENT"),
+	}
+	result, err := svc.GetSecretValue(context.TODO(), input)
+	if err != nil {
+		log.Println(err.Error())
+	}
+	var secretString string = *result.SecretString
 	var message models.Message
 	log.Println(event.Records[0].SNS.Message)
-	err := json.Unmarshal([]byte(event.Records[0].SNS.Message), &message)
+	err = json.Unmarshal([]byte(event.Records[0].SNS.Message), &message)
 	if err != nil {
 		log.Println("Failed to parse json")
 	}
@@ -27,7 +46,7 @@ func HandleUserEmailVerification(ctx context.Context, event events.SNSEvent) err
 	subject := "Verify Your Email Address"
 
 	to := mail.NewEmail("New User", message.Email) // Change to your recipient
-	url := fmt.Sprintf("http://%s?user=%s&token=%s", os.Getenv("URL"), message.Email, message.Token)
+	url := fmt.Sprintf("https://%s?user=%s&token=%s", os.Getenv("URL"), message.Email, message.Token)
 	emailBody := fmt.Sprintf(`
 	<!DOCTYPE html>
 	<html lang="en">
@@ -54,7 +73,7 @@ func HandleUserEmailVerification(ctx context.Context, event events.SNSEvent) err
 
 	email := mail.NewSingleEmail(from, subject, to, plainTextContent, htmlContent)
 	log.Println("message created")
-	client := sendgrid.NewSendClient(os.Getenv("SENDGRID_API_KEY"))
+	client := sendgrid.NewSendClient(secretString)
 	log.Println("client created")
 	response, err := client.Send(email)
 	log.Println("email sent")
